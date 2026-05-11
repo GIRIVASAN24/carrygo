@@ -26,12 +26,6 @@
         </svg>
         <span>KYC Verification</span>
       </a>
-      <a class="nav-item" [routerLink]="porterProfile ? ['/porter-routes', porterProfile.userId] : ['/porter-routes']" routerLinkActive="active">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M3 12h18M3 6l9-3 9 3M3 18l9 3 9-3"/>
-        </svg>
-        <span>My Routes</span>
-      </a>
       <a class="nav-item" [routerLink]="porterProfile ? ['/porter-profile', porterProfile.userId] : ['/porter-profile']" routerLinkActive="active">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
@@ -48,7 +42,7 @@
     <header class="top-header">
       <h2 class="header-title">KYC Verification</h2>
       <div class="header-actions">
-        <div class="status-switch-wrap" [class.is-online]="isOnline" [class.toggling]="isToggling" (click)="toggleStatus()" role="switch" [attr.aria-checked]="isOnline" tabindex="0" (keydown.space)="toggleStatus()">
+        <div class="status-switch-wrap" [class.is-online]="isOnline" [class.toggling]="isToggling" (click)="$event.stopPropagation(); toggleStatus()" role="switch" [attr.aria-checked]="isOnline" tabindex="0" (keydown.space)="$event.stopPropagation(); toggleStatus()">
           <div class="switch-track">
             <span class="switch-label-off">Offline</span>
             <span class="switch-label-on">Online</span>
@@ -63,14 +57,46 @@
         <div class="earnings-chip">
           <span>&#8377;</span>
           <span>{{ earningsToday | number:'1.0-0' }}</span>
-          <span class="earn-lbl">today</span>
+          <span class="earn-lbl">wallet</span>
         </div>
-        <button class="icon-btn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-          </svg>
-        </button>
+        <div class="notif-wrap" (click)="$event.stopPropagation()">
+          <button class="icon-btn notif-btn" (click)="toggleNotifPanel()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+          </button>
+          <div class="notif-panel" [class.open]="showNotifPanel">
+            <div class="notif-panel-header">
+              <span>Pending Requests</span>
+              <span class="notif-count-pill" *ngIf="orderRequests.length">{{ orderRequests.length }}</span>
+            </div>
+            <div class="notif-empty" *ngIf="orderRequests.length === 0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5" width="28" height="28">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+              <p>No pending requests</p>
+            </div>
+            <div class="notif-list" *ngIf="orderRequests.length > 0">
+              <div class="notif-item" *ngFor="let req of orderRequests">
+                <div class="notif-item-route">
+                  <span class="notif-dot green"></span>
+                  <span class="notif-addr">{{ req.pickupAddress | slice:0:28 }}…</span>
+                </div>
+                <div class="notif-item-route">
+                  <span class="notif-dot red"></span>
+                  <span class="notif-addr">{{ req.dropAddress | slice:0:28 }}…</span>
+                </div>
+                <div class="notif-item-meta">
+                  <span>{{ req.packageType || 'Parcel' }}</span>
+                  <span>{{ req.distanceKm | number:'1.1-1' }} km</span>
+                  <span class="notif-fare">₹{{ req.totalAmount | number:'1.0-0' }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="profile-section">
           <button class="avatar-btn" (click)="toggleProfileDropdown()">{{ userInitials }}</button>
           <div class="profile-dropdown" [class.open]="showProfileDropdown">
@@ -91,7 +117,17 @@
       </div>
     </header>
 
-    <div class="kyc-body">
+    <div *ngIf="!isOnline && !submitted" class="offline-placeholder">
+      <div class="offline-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5" width="48" height="48">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 5.636a9 9 0 010 12.728M5.636 5.636a9 9 0 000 12.728M9 10a3 3 0 116 0M3 3l18 18"/>
+        </svg>
+      </div>
+      <p class="offline-msg">You're offline</p>
+      <p class="offline-sub">Toggle online to access KYC Verification</p>
+    </div>
+
+    <div class="kyc-body" *ngIf="isOnline || submitted">
 
       <!-- ── Stepper ──────────────────────────────────────────────── -->
       <div class="stepper-wrap">
@@ -541,19 +577,29 @@
           </div>
         </div>
 
-        <!-- ━━ STEP 7: Review / Success ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+        <!-- ━━ STEP 7: KYC Accepted & Verified ━━━━━━━━━━━━━━━━━━━━━ -->
         <div *ngIf="currentStep === 6" class="step-panel">
+
+          <!-- Big verified hero -->
           <div class="success-hero">
-            <div class="success-ring">
-              <svg viewBox="0 0 24 24" fill="none" stroke="#1a9a6c" stroke-width="2.5" width="36" height="36">
+            <div class="success-ring verified-ring">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" width="40" height="40">
                 <polyline points="20 6 9 17 4 12"/>
               </svg>
             </div>
-            <h2 class="success-title">KYC Verified Successfully!</h2>
-            <p class="success-sub">Your details have been saved. You're all set to start accepting deliveries!</p>
+            <div class="verified-pill">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+              KYC Accepted &amp; Verified
+            </div>
+            <h2 class="success-title">You're all set!</h2>
+            <p class="success-sub">Your KYC has been verified and accepted. You can now accept delivery requests.</p>
           </div>
 
+          <!-- Verified details from DB -->
           <div class="review-list">
+
             <div class="review-row">
               <div class="review-icon bg-blue">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
@@ -562,10 +608,14 @@
               </div>
               <div class="review-info">
                 <div class="review-name">Personal Information</div>
-                <div class="review-desc">{{ form.fullName }} · {{ form.phone }}</div>
+                <div class="review-desc">{{ porterProfile?.name }} · {{ porterProfile?.phone }}</div>
               </div>
-              <span class="rev-tag tag-done">Submitted</span>
+              <span class="rev-tag tag-verified">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="11" height="11"><polyline points="20 6 9 17 4 12"/></svg>
+                Verified
+              </span>
             </div>
+
             <div class="review-row">
               <div class="review-icon bg-purple">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
@@ -574,22 +624,14 @@
               </div>
               <div class="review-info">
                 <div class="review-name">Identity Documents</div>
-                <div class="review-desc">{{ form.idType }} · {{ form.idNumber }}</div>
+                <div class="review-desc">Documents submitted &amp; accepted</div>
               </div>
-              <span class="rev-tag tag-review">Under review</span>
+              <span class="rev-tag tag-verified">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="11" height="11"><polyline points="20 6 9 17 4 12"/></svg>
+                Accepted
+              </span>
             </div>
-            <div class="review-row">
-              <div class="review-icon bg-orange">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
-                </svg>
-              </div>
-              <div class="review-info">
-                <div class="review-name">Address</div>
-                <div class="review-desc">{{ form.city }}, {{ form.state }} – {{ form.pinCode }}</div>
-              </div>
-              <span class="rev-tag tag-done">Submitted</span>
-            </div>
+
             <div class="review-row">
               <div class="review-icon bg-teal">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
@@ -599,10 +641,35 @@
               </div>
               <div class="review-info">
                 <div class="review-name">Vehicle &amp; Licence</div>
-                <div class="review-desc">{{ form.vehicleModel }} · {{ form.vehicleRegNo }}</div>
+                <div class="review-desc">
+                  {{ porterProfile?.vehicleType | titlecase }} · {{ porterProfile?.vehicleModel }} · {{ porterProfile?.vehicleNumber }}
+                </div>
               </div>
-              <span class="rev-tag tag-review">Under review</span>
+              <span class="rev-tag tag-verified">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="11" height="11"><polyline points="20 6 9 17 4 12"/></svg>
+                Verified
+              </span>
             </div>
+
+            <div class="review-row">
+              <div class="review-icon bg-orange">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                  <rect x="2" y="3" width="20" height="14" rx="2"/>
+                  <path d="M8 21h8M12 17v4"/>
+                </svg>
+              </div>
+              <div class="review-info">
+                <div class="review-name">Driving Licence</div>
+                <div class="review-desc">
+                  {{ porterProfile?.licenceNumber }} · Expires {{ porterProfile?.licenceExpiry }}
+                </div>
+              </div>
+              <span class="rev-tag tag-verified">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="11" height="11"><polyline points="20 6 9 17 4 12"/></svg>
+                Verified
+              </span>
+            </div>
+
             <div class="review-row">
               <div class="review-icon bg-green">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
@@ -611,15 +678,21 @@
               </div>
               <div class="review-info">
                 <div class="review-name">Bank Account</div>
-                <div class="review-desc">{{ form.bankName }} · {{ form.ifscCode }}</div>
+                <div class="review-desc">Bank details submitted &amp; on file</div>
               </div>
-              <span class="rev-tag tag-done">Submitted</span>
+              <span class="rev-tag tag-verified">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="11" height="11"><polyline points="20 6 9 17 4 12"/></svg>
+                Accepted
+              </span>
             </div>
+
           </div>
 
           <div class="btn-row" style="margin-top:24px">
-            <button class="btn-back" (click)="back()">&#8592; Edit details</button>
-            <button class="btn-next" routerLink="/porter-dashboard">Go to Dashboard &#8594;</button>
+            <button class="btn-next"
+              [routerLink]="porterProfile ? ['/porter-dashboard', porterProfile.userId] : ['/porter-dashboard']">
+              Go to Dashboard &#8594;
+            </button>
           </div>
         </div>
 
@@ -627,3 +700,33 @@
     </div><!-- /kyc-body -->
   </div>
 </div>
+
+<!-- ════════ MOBILE BOTTOM NAV ════════ -->
+<nav class="mobile-bottom-nav">
+  <a class="mbn-item" [routerLink]="porterProfile ? ['/porter-dashboard', porterProfile.userId] : ['/porter-dashboard']">
+    <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+      <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+    </svg>
+    <span>Dashboard</span>
+  </a>
+  <a class="mbn-item" [routerLink]="porterProfile ? ['/porter-deliveries', porterProfile.userId] : ['/porter-deliveries']">
+    <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path d="M5 8h14M5 8a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v.5"/>
+      <path d="M5 8l-.867 9.143A2 2 0 006.126 19h11.748a2 2 0 001.993-1.857L19 8"/>
+    </svg>
+    <span>Deliveries</span>
+  </a>
+  <a class="mbn-item active" [routerLink]="porterProfile ? ['/porter-kyc', porterProfile.userId] : ['/porter-kyc']">
+    <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>
+    <span>KYC</span>
+  </a>
+  <a class="mbn-item" [routerLink]="porterProfile ? ['/porter-profile', porterProfile.userId] : ['/porter-profile']">
+    <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+    </svg>
+    <span>Profile</span>
+  </a>
+</nav>

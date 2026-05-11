@@ -46,12 +46,12 @@ export class CommuterRegisterComponent implements OnInit {
     this.isSubmitting = true;
     this.errorMsg = '';
 
-    this.http.post(`http://localhost:8081/api/users/${this.user.userId}/register-commuter`, {}).pipe(
+    this.http.post(`https://carrygo-production.up.railway.app/api/users/${this.user.userId}/register-commuter`, {}).pipe(
       timeout(10000)  // fail after 10 s so the button never stays stuck
     ).subscribe({
       next: (updatedUser: any) => {
-        localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-        localStorage.setItem('userRole', updatedUser.role);
+        sessionStorage.setItem('currentUser', JSON.stringify(updatedUser));
+        sessionStorage.setItem('userRole', updatedUser.role);
         this.isSubmitting = false;
         this.cdr.detectChanges();
         this.router.navigate(['/porter-dashboard', updatedUser.userId]);

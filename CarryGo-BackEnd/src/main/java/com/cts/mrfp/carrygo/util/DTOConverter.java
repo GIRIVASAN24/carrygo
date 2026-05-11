@@ -20,7 +20,7 @@ public class DTOConverter {
         if (user == null) {
             return null;
         }
-        return new UsersDTO(
+        UsersDTO dto = new UsersDTO(
             user.getUserId(),
             user.getName(),
             user.getEmail(),
@@ -35,6 +35,8 @@ public class DTOConverter {
             user.getVehicleModel(),
             user.getIsOnline()
         );
+        dto.setAvgRating(user.getAvgRating());
+        return dto;
     }
 
     public static Users convertDTOToUsers(UsersDTO dto) {
@@ -104,6 +106,18 @@ public class DTOConverter {
             dto.setCommuterPhone(delivery.getCommuter().getPhone());
             dto.setCommuterVehicle(delivery.getCommuter().getVehicleType());
         }
+
+        // Dynamic pricing + OTP + broadcast fields
+        dto.setOtp(delivery.getOtp());
+        dto.setSurgeMultiplier(delivery.getSurgeMultiplier());
+        dto.setSurgeLabel(delivery.getSurgeLabel());
+        dto.setZoneSurcharge(delivery.getZoneSurcharge());
+        dto.setTimeFare(delivery.getTimeFare());
+        dto.setVehicleType(delivery.getVehicleType());
+        dto.setTotalPool(delivery.getTotalPool());
+        dto.setTotalNotified(delivery.getTotalNotified());
+        dto.setTotalRejected(delivery.getTotalRejected());
+
         return dto;
     }
 

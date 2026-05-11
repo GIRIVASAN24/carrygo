@@ -6,8 +6,6 @@ import com.cts.mrfp.carrygo.model.Users;
 import com.cts.mrfp.carrygo.dto.DeliveriesDTO;
 import com.cts.mrfp.carrygo.repository.UsersRepository;
 import com.cts.mrfp.carrygo.service.DeliveriesService;
-import com.cts.mrfp.carrygo.service.PorterRouteService;
-import com.cts.mrfp.carrygo.model.PorterRoute;
 import com.cts.mrfp.carrygo.util.DTOConverter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -17,14 +15,12 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
-@RequestMapping("/api/deliveries")
+@RequestMapping("api/deliveries")
 @CrossOrigin(origins = "*")
 public class DeliveriesController {
 
     @Autowired private DeliveriesService deliveryService;
     @Autowired private UsersRepository usersRepository;
-    @Autowired private PorterRouteService routeService;
-    @Autowired private com.cts.mrfp.carrygo.repository.PorterRouteRepository porterRouteRepository;
 
     @PostMapping
     public ResponseEntity<?> createDelivery(@RequestBody DeliveriesDTO deliveryDTO) {
@@ -103,10 +99,7 @@ public class DeliveriesController {
         }
     }
 
-    /**
-     * Returns the count of online porters whose routes match the given coordinates.
-     * Used by the frontend to show "X porters available" without posting a delivery yet.
-     */
+    // Returns count of all online porters available
     @GetMapping("/matching-porters-count")
     public ResponseEntity<Integer> getMatchingPortersCount(
             @RequestParam(required = false) Float pickupLat,
@@ -114,49 +107,18 @@ public class DeliveriesController {
             @RequestParam(required = false) Float dropLat,
             @RequestParam(required = false) Float dropLng) {
 
-        if (pickupLat == null || dropLat == null) {
-            // No coordinates — count all online porters
-            long count = usersRepository.findByIsOnlineTrue().stream()
-                .filter(u -> u.getRole() != null && u.getRole().contains("porter"))
-                .count();
-            return ResponseEntity.ok((int) count);
-        }
-
-        List<com.cts.mrfp.carrygo.model.Users> onlinePorters = usersRepository.findByIsOnlineTrue().stream()
+        long count = usersRepository.findByIsOnlineTrue().stream()
             .filter(u -> u.getRole() != null && u.getRole().contains("porter"))
-            .collect(java.util.stream.Collectors.toList());
-
-        int count = 0;
-        for (com.cts.mrfp.carrygo.model.Users porter : onlinePorters) {
-            List<PorterRoute> routes = porterRouteRepository.findByPorterUserId(porter.getUserId());
-            if (routes.isEmpty()) {
-                count++; // porter with no routes sees all deliveries
-            } else {
-                boolean matches = routes.stream().anyMatch(r ->
-                    routeService.matchesDelivery(r, pickupLat, pickupLng, dropLat, dropLng));
-                if (matches) count++;
-            }
-        }
-        return ResponseEntity.ok(count);
+            .count();
+        return ResponseEntity.ok((int) count);
     }
 
-    // Get PENDING deliveries matched to a specific porter's routes
+    // Get all PENDING deliveries for a porter
     @GetMapping("/matched/{porterId}")
     public List<DeliveriesDTO> getMatchedDeliveries(@PathVariable Integer porterId) {
-        List<Deliveries> pending = deliveryService.getAllAvailableDeliveries();
-        List<PorterRoute> routes = routeService.getRoutesByPorter(porterId);
-
-        return pending.stream()
-            .filter(d -> {
-                // No coords on delivery → show to everyone (fallback)
-                if (d.getPickupLat() == null || d.getDropLat() == null) return true;
-                // No routes set → show everything
-                if (routes.isEmpty()) return true;
-                // Match if any route fits
-                return routes.stream().anyMatch(r ->
-                    routeService.matchesDelivery(r, d.getPickupLat(), d.getPickupLng(),
-                                                    d.getDropLat(),   d.getDropLng()));
-            })
+        return deliveryService.getAllAvailableDeliveries().stream()
+            .filter(d -> d.getPickupAddress() != null && !d.getPickupAddress().isBlank()
+                      && d.getDropAddress()   != null && !d.getDropAddress().isBlank())
             .map(DTOConverter::convertDeliveriesToDTO)
             .collect(Collectors.toList());
     }
@@ -172,5 +134,52 @@ public class DeliveriesController {
     public List<DeliveriesDTO> getPersonalizedUserDeliveries(@PathVariable Integer userId) {
         List<Deliveries> deliveries = deliveryService.getDeliveriesByUser(userId);
         return deliveries.stream().map(DTOConverter::convertDeliveriesToDTO).collect(Collectors.toList());
+    }
+
+    // ── Feature 4: Porter arrived at pickup ────────────────────────────────────
+
+    @PatchMapping("/{id}/arrived")
+    public ResponseEntity<?> markArrived(@PathVariable Integer id,
+                                          @RequestParam Integer commuterId) {
+        try {
+            Deliveries d = deliveryService.markArrived(id, commuterId);
+            return ResponseEntity.ok(DTOConverter.convertDeliveriesToDTO(d));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    // ── Feature 4: Verify OTP and start ride ──────────────────────────────────
+
+    @PostMapping("/{id}/verify-otp")
+    public ResponseEntity<?> verifyOtp(@PathVariable Integer id,
+                                        @RequestBody java.util.Map<String, String> body) {
+        String entered = body.getOrDefault("enteredOtp", "");
+        try {
+            Deliveries d = deliveryService.verifyOtp(id, entered);
+            return ResponseEntity.ok(java.util.Map.of(
+                "success",     true,
+                "rideStarted", true,
+                "delivery",    DTOConverter.convertDeliveriesToDTO(d)
+            ));
+        } catch (RuntimeException e) {
+            String msg = "OTP_MISMATCH".equals(e.getMessage())
+                ? "Incorrect OTP — ask the rider to check their app"
+                : e.getMessage();
+            return ResponseEntity.badRequest().body(java.util.Map.of("success", false, "error", msg));
+        }
+    }
+
+    // ── Feature 2 & 5: Porter rejects a request (or 15s timer fires) ──────────
+
+    @PatchMapping("/{id}/reject")
+    public ResponseEntity<?> rejectDelivery(@PathVariable Integer id,
+                                             @RequestParam Integer commuterId) {
+        try {
+            deliveryService.rejectDelivery(id, commuterId);
+            return ResponseEntity.ok(java.util.Map.of("success", true));
+        } catch (Exception e) {
+            return ResponseEntity.ok(java.util.Map.of("success", false));
+        }
     }
 }

@@ -1,10 +1,13 @@
-import { Component, OnInit, HostListener } from '@angular/core';
+import { Component, OnInit, HostListener, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink, RouterLinkActive } from '@angular/router';
+import { Router, RouterLink, RouterLinkActive, ActivatedRoute } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { AuthService } from '../services/auth.service';
 import { UserService } from '../services/user-service';
+import { PorterStatusService } from '../services/porter-status.service';
+import { of } from 'rxjs';
+import { catchError } from 'rxjs/operators';
 
 interface Delivery {
   deliveryId: number;
@@ -42,39 +45,58 @@ type FilterTab = 'all' | 'active' | 'completed' | 'cancelled';
 export class PorterDeliveriesComponent implements OnInit {
   porterProfile: PorterProfile | null = null;
   userInitials: string = '';
-  isOnline: boolean = false;
+  get isOnline(): boolean { return this.statusService.isOnline; }
   isToggling: boolean = false;
   statusToast: string = '';
   earningsToday: number = 0;
   showProfileDropdown: boolean = false;
+  showNotifPanel: boolean = false;
+  orderRequests: any[] = [];
+  notificationCount: number = 0;
 
   allDeliveries: Delivery[] = [];
   filteredDeliveries: Delivery[] = [];
   searchQuery: string = '';
   activeFilter: FilterTab = 'all';
+  deliveriesLoaded: boolean = false;
 
   counts = { all: 0, active: 0, completed: 0, cancelled: 0 };
 
-  private readonly apiBase = 'http://localhost:8081/api';
+  private readonly apiBase = 'https://carrygo-production.up.railway.app/api';
 
   constructor(
     private authService: AuthService,
     private userService: UserService,
     private router: Router,
-    private http: HttpClient
+    private route: ActivatedRoute,
+    private http: HttpClient,
+    private statusService: PorterStatusService,
+    private cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit(): void {
     const email = this.authService.getLoggedInUserEmail();
     if (!email) { this.router.navigate(['/login']); return; }
 
+    // Use userId from URL immediately so data loads in parallel with the profile fetch
+    const paramId = this.route.snapshot.paramMap.get('userId');
+    if (paramId) {
+      const uid = +paramId;
+      this.loadWallet(uid);
+      this.loadDeliveries(uid);
+    }
+
     this.userService.getPorterProfileByEmail(email).subscribe({
       next: (profile: PorterProfile) => {
         this.porterProfile = profile;
-        this.isOnline = profile.isOnline ?? false;
+        this.statusService.init(profile.userId);
         this.generateInitials(profile.name);
-        this.loadWallet(profile.userId);
-        this.loadDeliveries(profile.userId);
+        this.loadPendingOrders(profile.userId);
+        this.cdr.detectChanges();
+        if (!paramId) {
+          this.loadWallet(profile.userId);
+          this.loadDeliveries(profile.userId);
+        }
       },
       error: () => this.router.navigate(['/login'])
     });
@@ -82,16 +104,26 @@ export class PorterDeliveriesComponent implements OnInit {
 
   loadWallet(userId: number): void {
     this.userService.getWalletByUserId(userId).subscribe({
-      next: (w: WalletData) => { this.earningsToday = w.balance ?? 0; }
+      next: (w: WalletData) => {
+        this.earningsToday = w.balance ?? 0;
+        this.cdr.detectChanges();
+      }
     });
   }
 
   loadDeliveries(userId: number): void {
+    this.deliveriesLoaded = false;
     this.http.get<Delivery[]>(`${this.apiBase}/deliveries/commuter/${userId}`).subscribe({
       next: (deliveries) => {
         this.allDeliveries = deliveries;
         this.rebuildCounts();
         this.applyFilter();
+        this.deliveriesLoaded = true;
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.deliveriesLoaded = true;
+        this.cdr.detectChanges();
       }
     });
   }
@@ -100,7 +132,7 @@ export class PorterDeliveriesComponent implements OnInit {
     this.counts.all       = this.allDeliveries.length;
     this.counts.active    = this.allDeliveries.filter(d => this.isActive(d)).length;
     this.counts.completed = this.allDeliveries.filter(d => d.status === 'DELIVERED').length;
-    this.counts.cancelled = this.allDeliveries.filter(d => d.status === 'CANCELLED').length;
+    this.counts.cancelled = this.allDeliveries.filter(d => d.status === 'CANCELLED' || d.status === 'REJECTED').length;
   }
 
   setFilter(tab: FilterTab): void {
@@ -114,7 +146,7 @@ export class PorterDeliveriesComponent implements OnInit {
     switch (this.activeFilter) {
       case 'active':    list = list.filter(d => this.isActive(d)); break;
       case 'completed': list = list.filter(d => d.status === 'DELIVERED'); break;
-      case 'cancelled': list = list.filter(d => d.status === 'CANCELLED'); break;
+      case 'cancelled': list = list.filter(d => d.status === 'CANCELLED' || d.status === 'REJECTED'); break;
     }
 
     const q = this.searchQuery.trim().toLowerCase();
@@ -132,7 +164,7 @@ export class PorterDeliveriesComponent implements OnInit {
   onSearch(): void { this.applyFilter(); }
 
   isActive(d: Delivery): boolean {
-    return d.status === 'ACCEPTED' || d.status === 'PICKED_UP';
+    return d.status === 'ACCEPTED' || d.status === 'ARRIVED_AT_PICKUP' || d.status === 'PICKED_UP';
   }
 
   get activeDeliveries(): Delivery[] {
@@ -163,27 +195,29 @@ export class PorterDeliveriesComponent implements OnInit {
 
   getStatusLabel(status: string): string {
     const map: Record<string, string> = {
-      'ACCEPTED':  'Pending',
-      'PICKED_UP': 'In transit',
-      'DELIVERED': 'Delivered',
-      'CANCELLED': 'Cancelled'
+      'ACCEPTED':          'Accepted',
+      'ARRIVED_AT_PICKUP': 'Arrived',
+      'PICKED_UP':         'In transit',
+      'DELIVERED':         'Delivered',
+      'CANCELLED':         'Cancelled'
     };
     return map[status] ?? status;
   }
 
   getStatusClass(status: string): string {
     const map: Record<string, string> = {
-      'ACCEPTED':  'status-pending',
-      'PICKED_UP': 'status-transit',
-      'DELIVERED': 'status-delivered',
-      'CANCELLED': 'status-cancelled'
+      'ACCEPTED':          'status-pending',
+      'ARRIVED_AT_PICKUP': 'status-transit',
+      'PICKED_UP':         'status-transit',
+      'DELIVERED':         'status-delivered',
+      'CANCELLED':         'status-cancelled'
     };
     return map[status] ?? '';
   }
 
   getIconType(status: string): 'truck' | 'clock' | 'check' | 'cancel' {
-    if (status === 'PICKED_UP') return 'truck';
-    if (status === 'ACCEPTED')  return 'clock';
+    if (status === 'PICKED_UP' || status === 'ARRIVED_AT_PICKUP') return 'truck';
+    if (status === 'ACCEPTED') return 'clock';
     if (status === 'DELIVERED') return 'check';
     return 'cancel';
   }
@@ -192,12 +226,16 @@ export class PorterDeliveriesComponent implements OnInit {
     if (!this.porterProfile || this.isToggling) return;
     this.isToggling = true;
     const next = !this.isOnline;
-    this.isOnline = next;
+    this.statusService.set(next);
     this.statusToast = next ? "You're now Online" : "You went Offline";
-    setTimeout(() => { this.isToggling = false; }, 600);
-    setTimeout(() => { this.statusToast = ''; }, 2800);
+    setTimeout(() => { this.isToggling = false; this.cdr.detectChanges(); }, 600);
+    setTimeout(() => { this.statusToast = ''; this.cdr.detectChanges(); }, 2800);
+    if (next) {
+      this.loadDeliveries(this.porterProfile.userId);
+      this.loadWallet(this.porterProfile.userId);
+    }
     this.userService.updatePorterStatus(this.porterProfile.userId, next).subscribe({
-      error: () => { this.isOnline = !next; }
+      error: () => { this.statusService.set(!next); }
     });
   }
 
@@ -206,12 +244,26 @@ export class PorterDeliveriesComponent implements OnInit {
     this.userInitials = parts.slice(0, 2).map(p => p[0].toUpperCase()).join('');
   }
 
-  toggleProfileDropdown(): void { this.showProfileDropdown = !this.showProfileDropdown; }
+  toggleProfileDropdown(): void { this.showProfileDropdown = !this.showProfileDropdown; this.showNotifPanel = false; }
+
+  toggleNotifPanel(): void { this.showNotifPanel = !this.showNotifPanel; this.showProfileDropdown = false; }
+
+  loadPendingOrders(userId: number): void {
+    this.http.get<any[]>(`${this.apiBase}/deliveries/matched/${userId}`)
+      .pipe(catchError(() => of([] as any[])))
+      .subscribe(orders => {
+        this.orderRequests = orders.filter((o: any) => o.pickupAddress?.trim() && o.dropAddress?.trim());
+        this.notificationCount = this.orderRequests.length;
+        this.cdr.detectChanges();
+      });
+  }
 
   @HostListener('document:click', ['$event'])
   onDocumentClick(event: MouseEvent): void {
     const el = document.querySelector('.profile-section');
     if (el && !el.contains(event.target as Node)) this.showProfileDropdown = false;
+    const notifEl = document.querySelector('.notif-wrap');
+    if (notifEl && !notifEl.contains(event.target as Node)) this.showNotifPanel = false;
   }
 
   logout(): void {

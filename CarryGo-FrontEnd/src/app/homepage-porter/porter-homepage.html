@@ -26,12 +26,6 @@
         </svg>
         <span>KYC Verification</span>
       </a>
-      <a class="nav-item" [routerLink]="porterProfile ? ['/porter-routes', porterProfile.userId] : ['/porter-routes']" routerLinkActive="active">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M3 12h18M3 6l9-3 9 3M3 18l9 3 9-3"/>
-        </svg>
-        <span>My Routes</span>
-      </a>
       <a class="nav-item" [routerLink]="porterProfile ? ['/porter-profile', porterProfile.userId] : ['/porter-profile']" routerLinkActive="active">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="8" r="4"/>
@@ -52,8 +46,8 @@
 
         <!-- Online toggle -->
         <div class="status-switch-wrap" [class.is-online]="isOnline" [class.toggling]="isToggling"
-             (click)="toggleStatus()" role="switch" [attr.aria-checked]="isOnline"
-             tabindex="0" (keydown.space)="toggleStatus()">
+             (click)="$event.stopPropagation(); toggleStatus()" role="switch" [attr.aria-checked]="isOnline"
+             tabindex="0" (keydown.space)="$event.stopPropagation(); toggleStatus()">
           <div class="switch-track">
             <span class="switch-label-off">Offline</span>
             <span class="switch-label-on">Online</span>
@@ -68,17 +62,51 @@
         <div class="earnings-chip">
           <span class="rupee">&#8377;</span>
           <span class="earnings-amount">{{ earningsToday | number:'1.0-0' }}</span>
-          <span class="earnings-label">today</span>
+          <span class="earnings-label">wallet</span>
         </div>
 
         <!-- Notification bell -->
-        <button class="icon-btn notif-btn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-          </svg>
-          <span class="badge" *ngIf="notificationCount > 0">{{ notificationCount }}</span>
-        </button>
+        <div class="notif-wrap" (click)="$event.stopPropagation()">
+          <button class="icon-btn notif-btn" (click)="toggleNotifPanel()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            <span class="badge" *ngIf="notificationCount > 0">{{ notificationCount }}</span>
+          </button>
+
+          <!-- Notification panel -->
+          <div class="notif-panel" [class.open]="showNotifPanel">
+            <div class="notif-panel-header">
+              <span>Pending Requests</span>
+              <span class="notif-count-pill" *ngIf="orderRequests.length">{{ orderRequests.length }}</span>
+            </div>
+            <div class="notif-empty" *ngIf="orderRequests.length === 0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5" width="28" height="28">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+              <p>No pending requests</p>
+            </div>
+            <div class="notif-list" *ngIf="orderRequests.length > 0">
+              <div class="notif-item" *ngFor="let req of orderRequests" (click)="openPopup(req); showNotifPanel = false">
+                <div class="notif-item-route">
+                  <span class="notif-dot green"></span>
+                  <span class="notif-addr">{{ req.pickupAddress | slice:0:28 }}…</span>
+                </div>
+                <div class="notif-item-route">
+                  <span class="notif-dot red"></span>
+                  <span class="notif-addr">{{ req.dropAddress | slice:0:28 }}…</span>
+                </div>
+                <div class="notif-item-meta">
+                  <span>{{ req.packageType || 'Parcel' }}</span>
+                  <span>{{ req.distanceKm | number:'1.1-1' }} km</span>
+                  <span class="notif-fare">₹{{ req.totalAmount | number:'1.0-0' }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <!-- Avatar -->
         <div class="profile-section">
@@ -135,7 +163,7 @@
           </div>
         </div>
         <!-- Wallet stat card -->
-        <div class="stat-card wallet-stat-card" (click)="navigate('wallet')">
+        <div class="stat-card wallet-stat-card">
           <div class="stat-label">Wallet Balance</div>
           <div class="stat-value">
             {{ walletBalance | number:'1.0-0' }}
@@ -143,7 +171,6 @@
               <text x="3" y="19" font-size="18" font-family="Arial">&#8377;</text>
             </svg>
           </div>
-          <div class="wallet-hint">Tap to manage</div>
         </div>
       </div>
 
@@ -188,8 +215,12 @@
             <div class="order-card-header">
               <span class="order-id">#ORD-{{ order.deliveryId }}</span>
               <div class="order-header-right">
+                <span class="order-status-badge" [ngClass]="{
+                  'badge-accepted':  order.status === 'ACCEPTED',
+                  'badge-arrived':   order.status === 'ARRIVED_AT_PICKUP',
+                  'badge-pickedup':  order.status === 'PICKED_UP'
+                }">{{ getStatusLabel(order.status) }}</span>
                 <span class="order-amount">&#8377;{{ order.totalAmount | number:'1.0-0' }}</span>
-                <!-- small nav icon — secondary action -->
                 <button class="nav-icon-btn" (click)="openNavMap(order)" title="Open map">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/>
@@ -198,19 +229,26 @@
               </div>
             </div>
 
-            <!-- 3-step progress stepper -->
+            <!-- 4-step progress stepper -->
             <div class="order-stepper">
               <div class="step done">
                 <div class="step-dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" width="10" height="10"><polyline points="20 6 9 17 4 12"/></svg></div>
                 <span>Accepted</span>
               </div>
+              <div class="step-line" [class.done]="isArrived(order) || isPickedUp(order)"></div>
+              <div class="step" [class.done]="isPickedUp(order)" [class.active]="isArrived(order)">
+                <div class="step-dot">
+                  <svg *ngIf="isPickedUp(order)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" width="10" height="10"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <span>At Pickup</span>
+              </div>
               <div class="step-line" [class.done]="isPickedUp(order)"></div>
-              <div class="step" [class.done]="isPickedUp(order)" [class.active]="!isPickedUp(order)">
+              <div class="step" [class.done]="false" [class.active]="isPickedUp(order)">
                 <div class="step-dot"></div>
                 <span>Picked Up</span>
               </div>
               <div class="step-line"></div>
-              <div class="step" [class.active]="isPickedUp(order)">
+              <div class="step">
                 <div class="step-dot"></div>
                 <span>Delivered</span>
               </div>
@@ -241,16 +279,58 @@
               <span class="dist-chip" *ngIf="order.distanceKm">{{ order.distanceKm | number:'1.1-1' }} km</span>
             </div>
 
+            <!-- ── OTP Panel (Feature 4) — shown when porter taps "Enter OTP" ── -->
+            <div class="otp-panel" *ngIf="showOtpPanel && otpOrderId === order.deliveryId">
+              <div class="otp-panel-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" width="16" height="16">
+                  <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 118 0v4"/>
+                </svg>
+                Enter OTP from sender
+              </div>
+              <div class="otp-boxes">
+                <input #otpInput
+                       *ngFor="let digit of otpDigits; let i = index; trackBy: trackOtpIndex"
+                       class="otp-box" type="text" inputmode="numeric"
+                       autocomplete="one-time-code" pattern="[0-9]*"
+                       maxlength="1"
+                       [value]="otpDigits[i]"
+                       (keydown)="onOtpKeydown($event, i)"
+                       (paste)="onOtpPaste($event)"/>
+              </div>
+              <div class="otp-error" *ngIf="otpError">{{ otpError }}</div>
+              <div class="otp-actions">
+                <button class="otp-cancel-btn" (click)="cancelOtp()">Cancel</button>
+                <button class="otp-submit-btn"
+                        [disabled]="otpDigits.join('').length !== 4 || otpSubmitting"
+                        (click)="submitOtp()">
+                  <span *ngIf="otpSubmitting" class="otp-spinner"></span>
+                  {{ otpSubmitting ? 'Verifying…' : 'Verify & Start Ride' }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Chat button — available once order is accepted -->
+            <button class="porter-chat-btn"
+                    *ngIf="!showOtpPanel || otpOrderId !== order.deliveryId"
+                    (click)="openPorterChat(order)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+              </svg>
+              Chat with Sender
+            </button>
+
             <!-- Single contextual action button -->
             <button class="action-btn progress-btn"
-                    [class.pickup-done-btn]="!isPickedUp(order)"
-                    [class.deliver-btn]="isPickedUp(order)"
+                    *ngIf="!(showOtpPanel && otpOrderId === order.deliveryId)"
+                    [class.pickup-done-btn]="order.status !== 'PICKED_UP'"
+                    [class.deliver-btn]="order.status === 'PICKED_UP'"
                     (click)="nextAction(order)">
-              <svg *ngIf="!isPickedUp(order)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
-              </svg>
-              <svg *ngIf="isPickedUp(order)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16">
-                <polyline points="20 6 9 17 4 12"/>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16">
+                <path *ngIf="order.status === 'ACCEPTED'" stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                <circle *ngIf="order.status === 'ACCEPTED'" cx="12" cy="11" r="3"/>
+                <rect *ngIf="order.status === 'ARRIVED_AT_PICKUP'" x="5" y="11" width="14" height="10" rx="2"/>
+                <path *ngIf="order.status === 'ARRIVED_AT_PICKUP'" d="M8 11V7a4 4 0 118 0v4"/>
+                <polyline *ngIf="order.status === 'PICKED_UP'" points="20 6 9 17 4 12"/>
               </svg>
               {{ getActionLabel(order) }}
             </button>
@@ -312,14 +392,8 @@
         <div class="wallet-header-row">
           <div>
             <div class="wallet-title">My Wallet</div>
-            <div class="wallet-sub">Your earnings &amp; withdrawal history</div>
+            <div class="wallet-sub">Your earnings &amp; balance</div>
           </div>
-          <button class="withdraw-btn" (click)="openWithdraw()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            </svg>
-            Withdraw
-          </button>
         </div>
 
         <div class="wallet-cards">
@@ -344,6 +418,100 @@
       </div>
 
     </main>
+  </div>
+</div>
+
+<!-- ═══════════════════════ RIDE REQUEST POPUP (Feature 3) ═══════════════════════ -->
+<div class="ride-popup-overlay" *ngIf="showRequestPopup" (click)="handleRejectPopup()">
+  <div class="ride-popup-sheet" (click)="$event.stopPropagation()">
+
+    <!-- Drag handle -->
+    <div class="popup-drag-handle"></div>
+
+    <!-- Header row: label + SVG countdown -->
+    <div class="popup-header">
+      <div class="popup-header-left">
+        <span class="popup-new-badge">NEW REQUEST</span>
+        <span class="popup-amount">&#8377;{{ incomingRequest?.totalAmount | number:'1.0-0' }}</span>
+        <span class="popup-dist" *ngIf="incomingRequest?.distanceKm">
+          · {{ incomingRequest!.distanceKm | number:'1.1-1' }} km
+        </span>
+      </div>
+
+      <!-- SVG circular countdown -->
+      <div class="popup-countdown-wrap">
+        <svg class="popup-countdown-svg" viewBox="0 0 64 64" width="64" height="64">
+          <!-- background track -->
+          <circle cx="32" cy="32" r="26" fill="none" stroke="#f1f5f9" stroke-width="5"/>
+          <!-- progress arc -->
+          <circle cx="32" cy="32" r="26" fill="none"
+                  [attr.stroke]="countdown <= 5 ? '#ef4444' : countdown <= 10 ? '#f59e0b' : '#2563eb'"
+                  stroke-width="5"
+                  stroke-linecap="round"
+                  [attr.stroke-dasharray]="countdownCircumference"
+                  [attr.stroke-dashoffset]="countdownDash"
+                  transform="rotate(-90 32 32)"/>
+          <!-- number -->
+          <text x="32" y="37" text-anchor="middle" font-size="18" font-weight="700"
+                [attr.fill]="countdown <= 5 ? '#ef4444' : countdown <= 10 ? '#f59e0b' : '#2563eb'"
+                font-family="Inter,system-ui,sans-serif">{{ countdown }}</text>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Surge badge if applicable -->
+    <div class="popup-surge-badge" *ngIf="incomingRequest?.surgeMultiplier && incomingRequest!.surgeMultiplier! > 1.0">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+      </svg>
+      {{ incomingRequest?.surgeLabel || 'Surge Pricing' }} · {{ incomingRequest?.surgeMultiplier }}x
+    </div>
+
+    <!-- Addresses -->
+    <div class="popup-route">
+      <div class="popup-route-row">
+        <span class="popup-dot green-dot"></span>
+        <div class="popup-route-detail">
+          <span class="popup-route-label">Pickup</span>
+          <span class="popup-route-addr">{{ incomingRequest?.pickupAddress }}</span>
+        </div>
+      </div>
+      <div class="popup-route-line"></div>
+      <div class="popup-route-row">
+        <span class="popup-dot red-dot"></span>
+        <div class="popup-route-detail">
+          <span class="popup-route-label">Drop</span>
+          <span class="popup-route-addr">{{ incomingRequest?.dropAddress }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Package info -->
+    <div class="popup-meta" *ngIf="incomingRequest?.packageType">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" width="14" height="14">
+        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/>
+        <circle cx="12" cy="10" r="3"/>
+      </svg>
+      {{ incomingRequest?.packageType }}
+      <span *ngIf="incomingRequest?.vehicleType">&nbsp;·&nbsp;{{ incomingRequest?.vehicleType }}</span>
+    </div>
+
+    <!-- Accept / Reject -->
+    <div class="popup-actions">
+      <button class="popup-reject-btn" (click)="handleRejectPopup()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+        Decline
+      </button>
+      <button class="popup-accept-btn" (click)="handleAcceptPopup()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        Accept Ride
+      </button>
+    </div>
+
   </div>
 </div>
 
@@ -403,112 +571,96 @@
         </svg>
         Open in Maps
       </button>
-      <button class="nav-picked-btn" (click)="markPickedUp(navOrder!); closeNavMap()">
-        Picked Up ✓
+      <button class="nav-picked-btn" (click)="nextAction(navOrder!); closeNavMap()">
+        {{ getActionLabel(navOrder!) }}
       </button>
     </div>
   </div>
 </div>
 
-<!-- ═══════════════════════ WITHDRAW MODAL ═══════════════════════ -->
-<div class="modal-overlay" *ngIf="showWithdrawModal" (click)="closeWithdraw()">
-  <div class="modal-box" (click)="$event.stopPropagation()">
+<!-- ════════ PORTER CHAT WINDOW ════════ -->
+<div class="chat-window" *ngIf="showChat">
+  <div class="chat-header">
+    <div class="chat-header-info">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+      </svg>
+      <span>Chat with Sender</span>
+      <span class="chat-order-id" *ngIf="chatOrder">#{{ chatOrder.deliveryId }}</span>
+    </div>
+    <button class="chat-close-btn" (click)="closePorterChat()">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  </div>
 
-    <!-- Success state -->
-    <div class="wd-success" *ngIf="withdrawSuccess">
-      <div class="wd-success-icon">✅</div>
-      <div class="wd-success-title">Withdrawal Initiated!</div>
-      <div class="wd-success-sub">₹{{ withdrawAmount }} will be credited within 24 hours.</div>
+  <div class="chat-messages" #chatScroll>
+    <div *ngIf="chatMessages.length === 0" class="chat-empty">
+      <svg width="32" height="32" fill="none" stroke="#cbd5e1" stroke-width="1.5" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+      </svg>
+      <p>No messages yet. Start the conversation!</p>
     </div>
 
-    <ng-container *ngIf="!withdrawSuccess">
-      <div class="modal-header">
-        <div class="modal-title">Withdraw Earnings</div>
-        <button class="modal-close" (click)="closeWithdraw()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18">
-            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </button>
-      </div>
-
-      <!-- Balance pill -->
-      <div class="wd-balance-pill">
-        Available: <strong>₹{{ walletBalance | number:'1.2-2' }}</strong>
-      </div>
-
-      <!-- Amount -->
-      <div class="wd-field">
-        <label>Amount to Withdraw</label>
-        <div class="wd-amount-wrap">
-          <span class="wd-rupee">₹</span>
-          <input type="number" [(ngModel)]="withdrawAmount" placeholder="0.00" min="1" [max]="withdrawMax"/>
-        </div>
-        <div class="wd-quick-btns">
-          <button (click)="withdrawAmount = '200'">₹200</button>
-          <button (click)="withdrawAmount = '500'">₹500</button>
-          <button (click)="withdrawAmount = '1000'">₹1000</button>
-          <button (click)="withdrawAmount = walletBalance.toString()">All</button>
+    <div *ngFor="let m of chatMessages"
+         class="chat-bubble-wrap"
+         [class.mine]="m.senderRole === 'PORTER'"
+         [class.theirs]="m.senderRole === 'USER'">
+      <div class="chat-bubble">
+        <div class="chat-bubble-msg">{{ m.message }}</div>
+        <div class="chat-bubble-meta">
+          {{ m.senderRole === 'PORTER' ? 'You' : m.senderName }}
+          · {{ m.sentAt | date:'HH:mm' }}
         </div>
       </div>
+    </div>
+  </div>
 
-      <!-- Method tabs -->
-      <div class="wd-method-tabs">
-        <button [class.active]="withdrawMethod==='upi'"        (click)="withdrawMethod='upi'">UPI</button>
-        <button [class.active]="withdrawMethod==='netbanking'" (click)="withdrawMethod='netbanking'">Net Banking</button>
-        <button [class.active]="withdrawMethod==='bank'"       (click)="withdrawMethod='bank'">Bank Transfer</button>
-      </div>
-
-      <!-- UPI -->
-      <div *ngIf="withdrawMethod==='upi'" class="wd-method-body">
-        <div class="wd-field">
-          <label>Choose UPI App</label>
-          <div class="upi-apps">
-            <div *ngFor="let app of upiApps" class="upi-app-tile"
-                 [class.selected]="selectedUpiApp===app.id"
-                 (click)="selectedUpiApp=app.id">
-              <span class="upi-logo">{{ app.logo }}</span>
-              <span class="upi-label">{{ app.label }}</span>
-              <div class="upi-check" *ngIf="selectedUpiApp===app.id">✓</div>
-            </div>
-          </div>
-        </div>
-        <div class="wd-field">
-          <label>UPI ID</label>
-          <input class="wd-input" type="text" [(ngModel)]="upiId"
-                 placeholder="yourname@upi" autocomplete="off"/>
-          <div class="wd-hint">e.g. 9876543210&#64;ybl (PhonePe), name&#64;okaxis (GPay)</div>
-        </div>
-      </div>
-
-      <!-- Net Banking -->
-      <div *ngIf="withdrawMethod==='netbanking'" class="wd-method-body">
-        <div class="wd-field">
-          <label>Select Bank</label>
-          <select class="wd-input" [(ngModel)]="selectedBank">
-            <option value="">-- Choose your bank --</option>
-            <option *ngFor="let b of banks" [value]="b">{{ b }}</option>
-          </select>
-        </div>
-        <div class="wd-info-note">You'll be redirected to your bank's portal to complete the transfer.</div>
-      </div>
-
-      <!-- Bank Transfer -->
-      <div *ngIf="withdrawMethod==='bank'" class="wd-method-body">
-        <div class="wd-field">
-          <label>Account Number</label>
-          <input class="wd-input" type="text" [(ngModel)]="accountNumber" placeholder="Enter account number"/>
-        </div>
-        <div class="wd-field">
-          <label>IFSC Code</label>
-          <input class="wd-input" type="text" [(ngModel)]="ifscCode" placeholder="e.g. SBIN0001234"
-                 style="text-transform:uppercase" maxlength="11"/>
-        </div>
-      </div>
-
-      <button class="wd-submit-btn" [disabled]="!withdrawValid || withdrawing" (click)="submitWithdraw()">
-        <span *ngIf="withdrawing" class="wd-spinner"></span>
-        {{ withdrawing ? 'Processing…' : 'Withdraw ₹' + (withdrawAmount || '0') }}
-      </button>
-    </ng-container>
+  <div class="chat-input-row">
+    <input class="chat-input"
+           placeholder="Type a message…"
+           [(ngModel)]="chatInput"
+           (keydown)="onPorterChatKeydown($event)"
+           [disabled]="chatSending"
+           maxlength="500"/>
+    <button class="chat-send-btn"
+            [disabled]="!chatInput.trim() || chatSending"
+            (click)="sendPorterChatMessage()">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+      </svg>
+    </button>
   </div>
 </div>
+
+<!-- ════════ MOBILE BOTTOM NAV ════════ -->
+<nav class="mobile-bottom-nav">
+  <a class="mbn-item" [class.active]="activeSection === 'dashboard'" (click)="navigate('dashboard')">
+    <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+      <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+    </svg>
+    <span>Dashboard</span>
+  </a>
+  <a class="mbn-item" [routerLink]="porterProfile ? ['/porter-deliveries', porterProfile.userId] : ['/porter-deliveries']">
+    <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path d="M5 8h14M5 8a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v.5"/>
+      <path d="M5 8l-.867 9.143A2 2 0 006.126 19h11.748a2 2 0 001.993-1.857L19 8"/>
+    </svg>
+    <span>Deliveries</span>
+  </a>
+  <a class="mbn-item" [routerLink]="porterProfile ? ['/porter-kyc', porterProfile.userId] : ['/porter-kyc']">
+    <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>
+    <span>KYC</span>
+  </a>
+  <a class="mbn-item" [routerLink]="porterProfile ? ['/porter-profile', porterProfile.userId] : ['/porter-profile']">
+    <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <circle cx="12" cy="8" r="4"/>
+      <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+    </svg>
+    <span>Profile</span>
+  </a>
+</nav>

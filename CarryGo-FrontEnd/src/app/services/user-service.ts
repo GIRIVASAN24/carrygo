@@ -13,6 +13,7 @@ export interface PorterProfile {
   licenceExpiry?: string;
   role: string;
   isOnline?: boolean;
+  avgRating?: number | null;
 }
 
 export interface WalletData {
@@ -30,7 +31,7 @@ export interface PorterStatus {
 
 @Injectable({ providedIn: 'root' })
 export class UserService {
-  private baseUrl = 'http://localhost:8081/api';
+  private baseUrl = 'https://carrygo-production.up.railway.app/api';
 
   constructor(private http: HttpClient) {}
 
@@ -58,10 +59,6 @@ export class UserService {
 
   getAvailableDeliveries(): Observable<any[]> {
     return this.http.get<any[]>(`${this.baseUrl}/deliveries/available`);
-  }
-
-  getPorterRatings(userId: number): Observable<any[]> {
-    return this.http.get<any[]>(`${this.baseUrl}/ratings/commuter/${userId}`);
   }
 
   updatePorterProfile(userId: number, profileData: Partial<PorterProfile>): Observable<PorterProfile> {

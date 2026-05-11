@@ -19,19 +19,25 @@ user = {
   countryCode: '+91',
   password: '',
   confirmPassword: '',
-  role: 'user',
-  agree: false
+  role: 'user'
 };
+
+get isCommuter(): boolean { return this.user.role === 'commuter'; }
+
+showPassword = false;
+showConfirmPassword = false;
 
 constructor(private authService: AuthService) {}
 
   onSubmit() {
-    if (this.user.password !== this.user.confirmPassword) {
-      alert('Passwords do not match!');
+    const passwordPattern = /^(?=.*[A-Z])(?=.*[0-9])(?=.*[!@#$%^&*()\-_+=\[\]{};:',.<>/?]).{8,}$/;
+    if (!passwordPattern.test(this.user.password)) {
+      alert('Password must be at least 8 characters and include 1 uppercase letter, 1 number, and 1 special character.');
       return;
     }
-    if (!this.user.agree) {
-      alert('You must agree to the terms before registering.');
+
+    if (this.user.password !== this.user.confirmPassword) {
+      alert('Passwords do not match!');
       return;
     }
 

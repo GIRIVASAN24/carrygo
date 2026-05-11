@@ -1,10 +1,13 @@
-import { Component, OnInit, HostListener } from '@angular/core';
+import { Component, OnInit, HostListener, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { AuthService } from '../services/auth.service';
 import { UserService } from '../services/user-service';
+import { PorterStatusService } from '../services/porter-status.service';
+import { of } from 'rxjs';
+import { catchError } from 'rxjs/operators';
 
 export interface KycFormData {
   // Step 1 – Personal
@@ -67,11 +70,14 @@ export class PorterKycComponent implements OnInit {
 
   porterProfile: any = null;
   userInitials = '';
-  isOnline = false;
+  get isOnline(): boolean { return this.statusService.isOnline; }
   isToggling = false;
   statusToast = '';
   earningsToday = 0;
   showProfileDropdown = false;
+  showNotifPanel = false;
+  orderRequests: any[] = [];
+  notificationCount = 0;
 
   steps: StepConfig[] = [
     { label: 'Personal',  icon: 'person' },
@@ -108,14 +114,26 @@ export class PorterKycComponent implements OnInit {
     agreedTerms: false, agreedAccuracy: false
   };
 
-  private readonly apiBase = 'http://localhost:8081/api';
+  private readonly apiBase = 'https://carrygo-production.up.railway.app/api';
 
   constructor(
     private authService: AuthService,
     private userService: UserService,
     private router: Router,
-    private http: HttpClient
+    private http: HttpClient,
+    private statusService: PorterStatusService,
+    private cdr: ChangeDetectorRef
   ) {}
+
+  get isKycVerified(): boolean {
+    return !!(
+      this.porterProfile?.vehicleType &&
+      this.porterProfile?.vehicleNumber &&
+      this.porterProfile?.vehicleModel &&
+      this.porterProfile?.licenceNumber &&
+      this.porterProfile?.licenceExpiry
+    );
+  }
 
   ngOnInit(): void {
     const email = this.authService.getLoggedInUserEmail();
@@ -123,13 +141,32 @@ export class PorterKycComponent implements OnInit {
     this.userService.getPorterProfileByEmail(email).subscribe({
       next: (p: any) => {
         this.porterProfile = p;
-        this.isOnline = p.isOnline ?? false;
+        this.statusService.init(p.userId);
         this.generateInitials(p.name);
-        this.form.fullName = p.name  ?? '';
-        this.form.phone    = p.phone ?? '';
-        this.form.email    = p.email ?? '';
+
+        // Pre-fill all available DB fields into the form
+        this.form.fullName      = p.name          ?? '';
+        this.form.phone         = p.phone         ?? '';
+        this.form.email         = p.email         ?? '';
+        this.form.vehicleType   = p.vehicleType   ?? '';
+        this.form.vehicleModel  = p.vehicleModel  ?? '';
+        this.form.vehicleRegNo  = p.vehicleNumber ?? '';
+        this.form.licenceNumber = p.licenceNumber ?? '';
+        this.form.licenceExpiry = p.licenceExpiry ? String(p.licenceExpiry) : '';
+
+        // If vehicle & licence data already exist, skip straight to verified screen
+        if (this.isKycVerified) {
+          this.currentStep = 6;
+          this.submitted   = true;
+        }
+
+        this.loadPendingOrders(p.userId);
+        this.cdr.detectChanges();
         this.userService.getWalletByUserId(p.userId).subscribe({
-          next: (w: any) => this.earningsToday = w.balance ?? 0
+          next: (w: any) => {
+            this.earningsToday = w.balance ?? 0;
+            this.cdr.detectChanges();
+          }
         });
       },
       error: () => this.router.navigate(['/login'])
@@ -252,30 +289,58 @@ export class PorterKycComponent implements OnInit {
     this.isSubmitting = true;
 
     const payload = {
-      name:          this.form.fullName,
-      phone:         this.form.phone,
-      vehicleType:   this.form.vehicleType,
-      vehicleModel:  this.form.vehicleModel,
-      vehicleNumber: this.form.vehicleRegNo,
-      licenceNumber: this.form.licenceNumber,
-      licenceExpiry: this.form.licenceExpiry
+      // Personal
+      name:               this.form.fullName,
+      phone:              this.form.phone,
+      gender:             this.form.gender,
+      dateOfBirth:        this.form.dob,
+      // Identity
+      idType:             this.form.idType,
+      idNumber:           this.form.idNumber,
+      idFrontImage:       this.form.idFrontPreview || null,
+      idBackImage:        this.form.idBackPreview  || null,
+      // Address
+      houseNo:            this.form.houseNo,
+      street:             this.form.street,
+      city:               this.form.city,
+      state:              this.form.state,
+      pinCode:            this.form.pinCode,
+      // Vehicle
+      vehicleType:        this.form.vehicleType,
+      vehicleModel:       this.form.vehicleModel,
+      vehicleNumber:      this.form.vehicleRegNo,
+      licenceNumber:      this.form.licenceNumber,
+      licenceExpiry:      this.form.licenceExpiry,
+      // Bank
+      bankAccountHolder:  this.form.accountHolder,
+      bankAccountNumber:  this.form.accountNumber,
+      bankIfscCode:       this.form.ifscCode,
+      bankName:           this.form.bankName,
+      // Status
+      kycStatus:          'VERIFIED'
     };
 
     this.http.put(`${this.apiBase}/users/${this.porterProfile.userId}`, payload).subscribe({
       next: (updatedUser: any) => {
-        // Merge updated fields into localStorage so profile shows KYC as verified
+        // Merge updated fields into sessionStorage so profile shows KYC as verified
         try {
-          const stored = localStorage.getItem('currentUser');
+          const stored = sessionStorage.getItem('currentUser');
           if (stored) {
             const merged = { ...JSON.parse(stored), ...updatedUser };
-            localStorage.setItem('currentUser', JSON.stringify(merged));
+            sessionStorage.setItem('currentUser', JSON.stringify(merged));
           }
         } catch {}
         this.isSubmitting = false;
         this.currentStep = 6;
         this.submitted = true;
+        this.cdr.detectChanges();
       },
-      error: () => { this.isSubmitting = false; this.currentStep = 6; this.submitted = true; }
+      error: () => {
+        this.isSubmitting = false;
+        this.currentStep = 6;
+        this.submitted = true;
+        this.cdr.detectChanges();
+      }
     });
   }
 
@@ -288,12 +353,13 @@ export class PorterKycComponent implements OnInit {
   toggleStatus(): void {
     if (!this.porterProfile || this.isToggling) return;
     this.isToggling = true;
-    this.isOnline = !this.isOnline;
-    this.statusToast = this.isOnline ? "You're now Online" : "You went Offline";
-    setTimeout(() => { this.isToggling = false; }, 600);
-    setTimeout(() => { this.statusToast = ''; }, 2800);
-    this.userService.updatePorterStatus(this.porterProfile.userId, this.isOnline).subscribe({
-      error: () => { this.isOnline = !this.isOnline; }
+    const next = !this.isOnline;
+    this.statusService.set(next);
+    this.statusToast = next ? "You're now Online" : "You went Offline";
+    setTimeout(() => { this.isToggling = false; this.cdr.detectChanges(); }, 600);
+    setTimeout(() => { this.statusToast = ''; this.cdr.detectChanges(); }, 2800);
+    this.userService.updatePorterStatus(this.porterProfile.userId, next).subscribe({
+      error: () => { this.statusService.set(!next); this.cdr.detectChanges(); }
     });
   }
 
@@ -302,12 +368,26 @@ export class PorterKycComponent implements OnInit {
     this.userInitials = parts.slice(0, 2).map((p: string) => p[0].toUpperCase()).join('');
   }
 
-  toggleProfileDropdown(): void { this.showProfileDropdown = !this.showProfileDropdown; }
+  toggleProfileDropdown(): void { this.showProfileDropdown = !this.showProfileDropdown; this.showNotifPanel = false; }
+
+  toggleNotifPanel(): void { this.showNotifPanel = !this.showNotifPanel; this.showProfileDropdown = false; }
+
+  loadPendingOrders(userId: number): void {
+    this.http.get<any[]>(`${this.apiBase}/deliveries/matched/${userId}`)
+      .pipe(catchError(() => of([] as any[])))
+      .subscribe(orders => {
+        this.orderRequests = orders.filter(o => o.pickupAddress?.trim() && o.dropAddress?.trim());
+        this.notificationCount = this.orderRequests.length;
+        this.cdr.detectChanges();
+      });
+  }
 
   @HostListener('document:click', ['$event'])
   onDocumentClick(event: MouseEvent): void {
     const el = document.querySelector('.profile-section');
     if (el && !el.contains(event.target as Node)) this.showProfileDropdown = false;
+    const notifEl = document.querySelector('.notif-wrap');
+    if (notifEl && !notifEl.contains(event.target as Node)) this.showNotifPanel = false;
   }
 
   logout(): void { this.authService.logout(); this.router.navigate(['/login']); }
